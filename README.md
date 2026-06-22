@@ -2,7 +2,7 @@
 
 A CLI with an embedded web UI, written in **[machin](https://github.com/javimosch/machin)** (MFL — the Machine-First Language). Compiles through C to a **single native binary** — no runtime, no interpreter, no dependencies.
 
-Part of the SuperCLI boilerplate family (Go, Rust, Zig, Node, …); this is the machin entry.
+Part of the SuperCLI boilerplate family (Go, Rust, Zig, Node, …); this is the machin entry. See also [**awesome-machin**](https://github.com/javimosch/awesome-machin) — the machin ecosystem.
 
 | Stack | Repo | Binary | SDK Size |
 |-------|------|--------|----------|
