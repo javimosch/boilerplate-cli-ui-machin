@@ -1,0 +1,23 @@
+// Foreign C functions for CLI/daemon plumbing (libc; no extra linking).
+extern "stdlib" {
+    header "stdlib.h"
+    fn atoi(string) i32
+}
+
+extern "unistd" {
+    header "unistd.h"
+    fn fork() i32
+    fn setsid() i32
+    fn getpid() i32
+    fn unlink(string) i32
+}
+
+extern "fcntl" {
+    header "fcntl.h"
+    fn open(string, i32, i32) i32
+}
+
+extern "signal" {
+    header "signal.h"
+    fn kill(i32, i32) i32
+}

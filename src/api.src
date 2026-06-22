@@ -1,0 +1,17 @@
+// JSON API: status + health. Agent-first — endpoints return JSON.
+
+type Status struct {
+    status  string
+    port    int
+    uptime  int
+    version string
+}
+
+func version() (v) { v = "1.0.0" }
+
+func status_json(port, start) (j) {
+    s := Status{"running", port, now() - start, version()}
+    j = json(s)
+}
+
+func health_json() (j) { j = "{\"status\":\"healthy\"}" }

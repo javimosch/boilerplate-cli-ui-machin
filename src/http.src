@@ -1,0 +1,43 @@
+// A minimal, self-contained HTTP server: listen, accept, route by path,
+// respond. One goroutine per connection. No framework needed.
+
+func http_resp(status, ctype, body) (r) {
+    r = "HTTP/1.1 " + status + "\r\nContent-Type: " + ctype + "\r\nContent-Length: " + str(len(body)) + "\r\nConnection: close\r\n\r\n" + body
+}
+
+func http_html(body) (r) { r = http_resp("200 OK", "text/html; charset=utf-8", body) }
+
+func http_json(body) (r) { r = http_resp("200 OK", "application/json", body) }
+
+// req_path extracts the path from the request line: "GET /api/status HTTP/1.1".
+func req_path(req) (p) {
+    a := index(req, " ")
+    rest := substr(req, a + 1, len(req))
+    b := index(rest, " ")
+    p = substr(rest, 0, b)
+}
+
+func handle_conn(conn, start, port) {
+    req := read(conn)
+    path := req_path(req)
+    if has_prefix(path, "/api/status") {
+        write(conn, http_json(status_json(port, start)))
+    } else if has_prefix(path, "/api/health") {
+        write(conn, http_json(health_json()))
+    } else {
+        write(conn, http_html(index_html()))
+    }
+    close(conn)
+}
+
+func serve(port) {
+    s := listen(port)
+    start := now()
+    println("boilerplate-cli-ui-machin serving on http://localhost:" + str(port))
+    println("  UI:  http://localhost:" + str(port) + "/")
+    println("  API: http://localhost:" + str(port) + "/api/status")
+    for {
+        conn := accept(s)
+        go handle_conn(conn, start, port)
+    }
+}

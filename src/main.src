@@ -1,0 +1,66 @@
+// CLI entry point and command routing.
+//   start [-port N] [-daemon] | stop | status | version | help
+
+func has_flag(a, name) (f) {
+    f = false
+    for _, v := range a {
+        if v == name { f = true }
+    }
+}
+
+func flag_value(a, name, def) (val) {
+    val = def
+    i := 0
+    while i < len(a) {
+        if a[i] == name {
+            if i + 1 < len(a) { val = a[i + 1] }
+        }
+        i = i + 1
+    }
+}
+
+func resolve_port(a) (port) {
+    p := flag_value(a, "-port", env("PORT"))
+    if p == "" { p = "8080" }
+    port = atoi(p)
+}
+
+func usage() {
+    println("boilerplate-cli-ui-machin - machin CLI with an embedded web UI")
+    println("")
+    println("usage: boilerplate-cli-ui-machin <command> [options]")
+    println("")
+    println("commands:")
+    println("  start            start the HTTP server in the foreground")
+    println("  start -port N    listen on port N (or $PORT; default 8080)")
+    println("  start -daemon    start in the background (writes a pid file)")
+    println("  stop             stop the background server")
+    println("  status           report background server status")
+    println("  version          print the version")
+    println("  help             show this help")
+    println("")
+    println("endpoints: GET /  (web UI)   GET /api/status   GET /api/health")
+}
+
+func main() {
+    a := args()
+    cmd := "help"
+    if len(a) > 1 { cmd = a[1] }
+
+    if cmd == "start" {
+        port := resolve_port(a)
+        if has_flag(a, "-daemon") {
+            start_daemon(port)
+        } else {
+            serve(port)
+        }
+    } else if cmd == "stop" {
+        stop_daemon()
+    } else if cmd == "status" {
+        daemon_status()
+    } else if cmd == "version" {
+        println("boilerplate-cli-ui-machin v" + version())
+    } else {
+        usage()
+    }
+}

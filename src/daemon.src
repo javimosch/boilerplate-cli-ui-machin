@@ -1,0 +1,59 @@
+// Daemon management via the C FFI: fork/setsid to detach, a pid file (written
+// with machin's fd builtins over an FFI open()), and kill() to stop/probe.
+
+func pid_path() (p) { p = "/tmp/boilerplate-cli-ui-machin.pid" }
+
+// O_WRONLY|O_CREAT|O_TRUNC = 1|64|512 = 577, mode 0644 = 420
+func write_pid(pid) {
+    fd := open(pid_path(), 577, 420)
+    if fd >= 0 {
+        write(fd, str(pid))
+        close(fd)
+    }
+}
+
+// O_RDONLY = 0; read() is machin's fd read builtin, atoi() is from libc.
+func read_pid() (pid) {
+    fd := open(pid_path(), 0, 0)
+    pid = 0
+    if fd >= 0 {
+        s := read(fd)
+        close(fd)
+        pid = atoi(s)
+    }
+}
+
+func start_daemon(port) {
+    pid := fork()
+    if pid > 0 {
+        println("started in background (pid " + str(pid) + ")")
+        return
+    }
+    setsid()
+    write_pid(getpid())
+    serve(port)
+}
+
+func stop_daemon() {
+    pid := read_pid()
+    if pid <= 0 {
+        println("not running")
+        return
+    }
+    kill(pid, 15)
+    unlink(pid_path())
+    println("stopped (pid " + str(pid) + ")")
+}
+
+func daemon_status() {
+    pid := read_pid()
+    if pid <= 0 {
+        println("status: stopped")
+        return
+    }
+    if kill(pid, 0) == 0 {
+        println("status: running (pid " + str(pid) + ")")
+    } else {
+        println("status: stale pid file (pid " + str(pid) + " not alive)")
+    }
+}

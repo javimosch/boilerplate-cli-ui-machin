@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>machin · CLI UI</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen">
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect } = React;
+
+function Card({ label, value, accent }) {
+  return (
+    <div className="bg-slate-800/70 rounded-xl p-5 border border-slate-700">
+      <div className="text-slate-400 text-xs uppercase tracking-wide">{label}</div>
+      <div className={'text-2xl font-semibold mt-1 ' + (accent || 'text-emerald-300')}>{value}</div>
+    </div>
+  );
+}
+
+function App() {
+  const [status, setStatus] = useState(null);
+  const [health, setHealth] = useState('…');
+  const [err, setErr] = useState(false);
+
+  useEffect(() => {
+    const tick = () => {
+      fetch('/api/status').then(r => r.json()).then(d => { setStatus(d); setErr(false); }).catch(() => setErr(true));
+      fetch('/api/health').then(r => r.json()).then(d => setHealth(d.status)).catch(() => {});
+    };
+    tick();
+    const id = setInterval(tick, 2000);
+    return () => clearInterval(id);
+  }, []);
+
+  return (
+    <div className="max-w-3xl mx-auto px-6 py-12">
+      <header className="flex items-center gap-3 mb-2">
+        <span className="text-emerald-400 text-3xl font-bold">machin</span>
+        <span className="text-slate-500 text-xl">· CLI UI</span>
+      </header>
+      <p className="text-slate-400 mb-10">
+        A single native binary — compiled from MFL through C — serving this page and a JSON API.
+        {err ? <span className="text-rose-400"> (api unreachable)</span> : null}
+      </p>
+
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+        <Card label="Status" value={status ? status.status : '…'} />
+        <Card label="Health" value={health} accent={health === 'healthy' ? 'text-emerald-300' : 'text-amber-300'} />
+        <Card label="Port" value={status ? status.port : '…'} accent="text-sky-300" />
+        <Card label="Uptime (s)" value={status ? status.uptime : '…'} accent="text-sky-300" />
+        <Card label="Version" value={status ? status.version : '…'} accent="text-slate-200" />
+      </div>
+
+      <div className="mt-10 text-sm text-slate-500">
+        <p>API: <code className="text-slate-300">GET /api/status</code> · <code className="text-slate-300">GET /api/health</code></p>
+        <p className="mt-2">Edit <code className="text-slate-300">ui/index.html</code> and rebuild — it is embedded into the binary at compile time.</p>
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>
