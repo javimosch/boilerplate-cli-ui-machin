@@ -1,0 +1,29 @@
+name: CI
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: build + smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install machin
+        run: curl -fsSL https://raw.githubusercontent.com/javimosch/machin/main/install.sh | sh
+      - run: echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Build
+        run: ./build.sh
+
+      - name: Smoke test
+        run: ./boilerplate-cli-ui-machin version
+
+      - name: Report binary size
+        run: |
+          set -e
+          BIN=$(echo "./boilerplate-cli-ui-machin version" | awk '{print $1}')
+          echo "binary=$BIN size=$(stat -c%s "$BIN") bytes"
