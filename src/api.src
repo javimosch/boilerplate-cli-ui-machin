@@ -1,4 +1,4 @@
-// JSON API: status + health. Agent-first — endpoints return JSON.
+// JSON API: app status + the daemon health route.
 
 type Status struct {
     status  string
@@ -14,4 +14,8 @@ func status_json(port, start) (j) {
     j = json(s)
 }
 
-func health_json() (j) { j = "{\"status\":\"healthy\"}" }
+// health_json is the cli-daemon-spec §2 shape: {ok, service, pid}. Keep it
+// cheap — no database round trip, no dependency check.
+func health_json(port) (j) {
+    j = "{\"ok\":true,\"service\":\"boilerplate-cli-ui-machin\",\"pid\":" + str(getpid()) + ",\"port\":" + str(port) + "}"
+}

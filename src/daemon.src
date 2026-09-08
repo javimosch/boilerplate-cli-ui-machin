@@ -1,5 +1,11 @@
-// Daemon management via the C FFI: fork/setsid to detach, a pid file (written
-// with machin's fd builtins over an FFI open()), and kill() to stop/probe.
+// Daemon lifecycle (cli-daemon-spec §4).
+//
+// The tool has an embedded HTTP server, so /_health is the source of truth and
+// the pid file is only a convenience for the log tail. Every subcommand is
+// idempotent and probes health rather than sleeping a fixed amount.
+//
+// Detaching uses the C FFI: fork/setsid, a pid file written with machin's fd
+// builtins over an FFI open(), and kill() to reap a stale process.
 
 func pid_path() (p) { p = "/tmp/boilerplate-cli-ui-machin.pid" }
 
@@ -23,37 +29,110 @@ func read_pid() (pid) {
     }
 }
 
-func start_daemon(port) {
-    pid := fork()
-    if pid > 0 {
-        println("started in background (pid " + str(pid) + ")")
-        return
-    }
-    setsid()
-    write_pid(getpid())
-    serve(port)
+func health_url(port) (u) { u = "http://127.0.0.1:" + str(port) + "/_health" }
+
+// probe_health returns the health body, or "" if nothing is listening.
+func probe_health(port) (body) {
+    body = ""
+    status, b, err := http_get(health_url(port))
+    if len(err) > 0 { return }
+    if status != 200 { return }
+    body = b
 }
 
-func stop_daemon() {
-    pid := read_pid()
-    if pid <= 0 {
-        println("not running")
+// wait_healthy polls /_health (every 100ms, 5s total) instead of sleeping a
+// fixed amount — cli-daemon-spec §4.
+func wait_healthy(port) (ok) {
+    ok = false
+    i := 0
+    while i < 50 {
+        if len(probe_health(port)) > 0 {
+            ok = true
+            return
+        }
+        sleep(100)
+        i = i + 1
+    }
+}
+
+func wait_gone(port) (ok) {
+    ok = false
+    i := 0
+    while i < 50 {
+        if len(probe_health(port)) == 0 {
+            ok = true
+            return
+        }
+        sleep(100)
+        i = i + 1
+    }
+}
+
+// daemon_start is idempotent: if the port is already healthy it reports the
+// running instance and succeeds rather than racing a second process onto it.
+func daemon_start(host, port) {
+    if len(probe_health(port)) > 0 {
+        println("{\"ok\":true,\"running\":true,\"already_running\":true,\"port\":" + str(port) + "}")
         return
     }
+
+    pid := fork()
+    if pid == 0 {
+        setsid()
+        write_pid(getpid())
+        serve(host, port)
+        return
+    }
+
+    if wait_healthy(port) {
+        println("{\"ok\":true,\"running\":true,\"already_running\":false,\"pid\":" + str(pid) + ",\"port\":" + str(port) + "}")
+        return
+    }
+
     kill(pid, 15)
     unlink(pid_path())
-    println("stopped (pid " + str(pid) + ")")
+    die(100, "daemon_unhealthy",
+        "started pid " + str(pid) + " but /_health never answered on port " + str(port),
+        "boilerplate-cli-ui-machin serve --port " + str(port))
 }
 
-func daemon_status() {
-    pid := read_pid()
-    if pid <= 0 {
-        println("status: stopped")
+// daemon_stop is a no-op success when nothing is running — an agent stopping
+// an already-stopped daemon has got what it wanted.
+func daemon_stop(port) {
+    if len(probe_health(port)) == 0 {
+        unlink(pid_path())
+        println("{\"ok\":true,\"running\":false,\"stopped\":false,\"port\":" + str(port) + "}")
         return
     }
-    if kill(pid, 0) == 0 {
-        println("status: running (pid " + str(pid) + ")")
-    } else {
-        println("status: stale pid file (pid " + str(pid) + " not alive)")
+
+    status, body, err := http_request("POST", "http://127.0.0.1:" + str(port) + "/_shutdown", []string{}, "")
+    _ = body
+    if len(err) > 0 {
+        die(100, "shutdown_failed",
+            "POST /_shutdown failed: " + err,
+            "boilerplate-cli-ui-machin daemon status --port " + str(port))
     }
+    if status != 200 {
+        die(100, "shutdown_refused",
+            "POST /_shutdown returned " + str(status),
+            "boilerplate-cli-ui-machin daemon status --port " + str(port))
+    }
+
+    if wait_gone(port) == false {
+        pid := read_pid()
+        if pid > 0 { kill(pid, 15) }
+    }
+    unlink(pid_path())
+    println("{\"ok\":true,\"running\":false,\"stopped\":true,\"port\":" + str(port) + "}")
+}
+
+// daemon_status only ever reads: it never carries the shutdown token.
+func daemon_status(port) {
+    body := probe_health(port)
+    if len(body) == 0 {
+        println("{\"ok\":true,\"running\":false,\"port\":" + str(port) + "}")
+        return
+    }
+    pid := read_pid()
+    println("{\"ok\":true,\"running\":true,\"pid\":" + str(pid) + ",\"port\":" + str(port) + "}")
 }

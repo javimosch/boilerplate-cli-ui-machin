@@ -1,5 +1,12 @@
 // A minimal, self-contained HTTP server: listen, accept, route by path,
 // respond. One goroutine per connection. No framework needed.
+//
+// Routes: GET /            the embedded UI
+//         GET /api/status  app JSON
+//         GET /_health     cli-daemon-spec §2 — open, fast, {ok,service,pid}
+//         POST /_shutdown  cli-daemon-spec §3 — answer, then exit
+
+var bound_host = "127.0.0.1"
 
 func http_resp(status, ctype, body) (r) {
     r = "HTTP/1.1 " + status + "\r\nContent-Type: " + ctype + "\r\nContent-Length: " + str(len(body)) + "\r\nConnection: close\r\n\r\n" + body
@@ -9,6 +16,8 @@ func http_html(body) (r) { r = http_resp("200 OK", "text/html; charset=utf-8", b
 
 func http_json(body) (r) { r = http_resp("200 OK", "application/json", body) }
 
+func http_json_status(status, body) (r) { r = http_resp(status, "application/json", body) }
+
 // req_path extracts the path from the request line: "GET /api/status HTTP/1.1".
 func req_path(req) (p) {
     a := index(req, " ")
@@ -17,25 +26,92 @@ func req_path(req) (p) {
     p = substr(rest, 0, b)
 }
 
+func req_method(req) (m) {
+    a := index(req, " ")
+    m = substr(req, 0, a)
+}
+
+// is_loopback decides whether /_shutdown needs a token (cli-daemon-spec §3).
+// Off-loopback, an open shutdown route is a remote kill switch.
+func is_loopback(host) (ok) {
+    ok = false
+    if host == "127.0.0.1" { ok = true }
+    if host == "localhost" { ok = true }
+    if host == "::1" { ok = true }
+}
+
+// shutdown_authorized: on loopback, always. Otherwise the request must carry
+// X-Shutdown-Token matching $SHUTDOWN_TOKEN.
+func shutdown_authorized(req) (ok) {
+    if is_loopback(bound_host) {
+        ok = true
+        return
+    }
+    token := env("SHUTDOWN_TOKEN")
+    ok = false
+    if len(token) == 0 { return }
+    ok = contains(req, "X-Shutdown-Token: " + token)
+}
+
 func handle_conn(conn, start, port) {
     req := read(conn)
     path := req_path(req)
+
+    if has_prefix(path, "/_health") {
+        write(conn, http_json(health_json(port)))
+        close(conn)
+        return
+    }
+
+    if has_prefix(path, "/_shutdown") {
+        if req_method(req) != "POST" {
+            write(conn, http_json_status("405 Method Not Allowed", "{\"ok\":false,\"error\":{\"code\":85,\"type\":\"method_not_allowed\",\"message\":\"POST /_shutdown\",\"recoverable\":false}}"))
+            close(conn)
+            return
+        }
+        if shutdown_authorized(req) == false {
+            // 403 and the process MUST NOT stop (cli-daemon-spec §3).
+            write(conn, http_json_status("403 Forbidden", "{\"ok\":false,\"error\":{\"code\":90,\"type\":\"forbidden\",\"message\":\"X-Shutdown-Token required when bound off-loopback\",\"recoverable\":false}}"))
+            close(conn)
+            return
+        }
+        // Answer before exiting, so the caller knows the request was accepted.
+        write(conn, http_json("{\"ok\":true,\"stopping\":true}"))
+        close(conn)
+        unlink(pid_path())
+        exit(0)
+    }
+
     if has_prefix(path, "/api/status") {
         write(conn, http_json(status_json(port, start)))
     } else if has_prefix(path, "/api/health") {
-        write(conn, http_json(health_json()))
+        write(conn, http_json(health_json(port)))
+    } else if has_prefix(path, "/guide") {
+        write(conn, http_json(guide_json()))
+    } else if has_prefix(path, "/llms.txt") {
+        write(conn, http_resp("200 OK", "text/plain; charset=utf-8", llms_txt()))
     } else {
         write(conn, http_html(index_html()))
     }
     close(conn)
 }
 
-func serve(port) {
-    s := listen(port)
+func serve(host, port) {
+    s := listen_on(host, port)
+    if s < 0 {
+        // listen_on returns -1 rather than exiting; without this guard the
+        // accept loop below spins on a bad fd.
+        die(90, "port_unavailable",
+            "cannot bind " + host + ":" + str(port),
+            "boilerplate-cli-ui-machin serve --port " + str(port + 1))
+    }
+    bound_host = host
     start := now()
-    println("boilerplate-cli-ui-machin serving on http://localhost:" + str(port))
-    println("  UI:  http://localhost:" + str(port) + "/")
-    println("  API: http://localhost:" + str(port) + "/api/status")
+    // The confirmation line is context, so it belongs on stderr — stdout stays
+    // available for data (cli-daemon-spec §1).
+    eprintln("boilerplate-cli-ui-machin serving on http://" + host + ":" + str(port))
+    eprintln("  UI:  http://" + host + ":" + str(port) + "/")
+    eprintln("  API: http://" + host + ":" + str(port) + "/api/status")
     for {
         conn := accept(s)
         go handle_conn(conn, start, port)

@@ -1,5 +1,12 @@
 // CLI entry point and command routing.
-//   start [-port N] [-daemon] | stop | status | version | help
+//
+// The command surface follows the agent-first CLI specs
+// (https://cli-specs.intrane.fr):
+//   cli-output-spec  — data on stdout, context on stderr, exit codes 80-119,
+//                      typed errors, help-json
+//   cli-guide-spec   — `guide`, embedded in the binary
+//   cli-daemon-spec  — `serve --host --port`, /_health, /_shutdown,
+//                      `daemon start|stop|status`
 
 func has_flag(a, name) (f) {
     f = false
@@ -8,6 +15,7 @@ func has_flag(a, name) (f) {
     }
 }
 
+// flag_value reads `--name value`, `-name value` or `--name=value`.
 func flag_value(a, name, def) (val) {
     val = def
     i := 0
@@ -15,31 +23,48 @@ func flag_value(a, name, def) (val) {
         if a[i] == name {
             if i + 1 < len(a) { val = a[i + 1] }
         }
+        pfx := name + "="
+        if len(a[i]) > len(pfx) {
+            if substr(a[i], 0, len(pfx)) == pfx {
+                val = substr(a[i], len(pfx), len(a[i]))
+            }
+        }
         i = i + 1
     }
 }
 
+// resolve_port: --port / -port wins over $PORT, which wins over the compiled
+// default (cli-daemon-spec §1).
 func resolve_port(a) (port) {
-    p := flag_value(a, "-port", env("PORT"))
+    p := flag_value(a, "--port", flag_value(a, "-port", env("PORT")))
     if p == "" { p = "8080" }
     port = atoi(p)
 }
 
+// resolve_host: the default MUST be loopback (cli-daemon-spec §1). Serving the
+// whole network is an explicit, deliberate act.
+func resolve_host(a) (host) {
+    host = flag_value(a, "--host", flag_value(a, "-host", env("HOST")))
+    if host == "" { host = "127.0.0.1" }
+}
+
 func usage() {
-    println("boilerplate-cli-ui-machin - machin CLI with an embedded web UI")
-    println("")
-    println("usage: boilerplate-cli-ui-machin <command> [options]")
-    println("")
-    println("commands:")
-    println("  start            start the HTTP server in the foreground")
-    println("  start -port N    listen on port N (or $PORT; default 8080)")
-    println("  start -daemon    start in the background (writes a pid file)")
-    println("  stop             stop the background server")
-    println("  status           report background server status")
-    println("  version          print the version")
-    println("  help             show this help")
-    println("")
-    println("endpoints: GET /  (web UI)   GET /api/status   GET /api/health")
+    eprintln("boilerplate-cli-ui-machin - machin CLI with an embedded web UI")
+    eprintln("")
+    eprintln("usage: boilerplate-cli-ui-machin <command> [options]")
+    eprintln("")
+    eprintln("commands:")
+    eprintln("  serve [--host H] [--port N]   run the HTTP server in the foreground")
+    eprintln("  daemon start [--port N]       start it in the background")
+    eprintln("  daemon stop [--port N]        stop the background server")
+    eprintln("  daemon status [--port N]      report background server status")
+    eprintln("  guide [--human]               the embedded operator guide")
+    eprintln("  help-json                     machine-readable command catalog")
+    eprintln("  version [--json]              print the version")
+    eprintln("  help                          show this help")
+    eprintln("")
+    eprintln("endpoints: GET /  GET /api/status  GET /_health  POST /_shutdown")
+    eprintln("exit codes: 0 ok, 80-89 input, 90-99 state, 100-109 external, 110-119 internal")
 }
 
 func main() {
@@ -47,20 +72,75 @@ func main() {
     cmd := "help"
     if len(a) > 1 { cmd = a[1] }
 
-    if cmd == "start" {
-        port := resolve_port(a)
-        if has_flag(a, "-daemon") {
-            start_daemon(port)
-        } else {
-            serve(port)
-        }
-    } else if cmd == "stop" {
-        stop_daemon()
-    } else if cmd == "status" {
-        daemon_status()
-    } else if cmd == "version" {
-        println("boilerplate-cli-ui-machin v" + version())
-    } else {
-        usage()
+    if cmd == "serve" {
+        serve(resolve_host(a), resolve_port(a))
+        return
     }
+
+    if cmd == "daemon" {
+        sub := ""
+        if len(a) > 2 { sub = a[2] }
+        if sub == "start" {
+            daemon_start(resolve_host(a), resolve_port(a))
+        } else if sub == "stop" {
+            daemon_stop(resolve_port(a))
+        } else if sub == "status" {
+            daemon_status(resolve_port(a))
+        } else {
+            die(85, "unknown_command",
+                "unknown daemon subcommand \"" + sub + "\"",
+                "boilerplate-cli-ui-machin daemon status")
+        }
+        return
+    }
+
+    if cmd == "guide" {
+        if has_flag(a, "--human") {
+            println(guide_markdown())
+        } else {
+            println(guide_json())
+        }
+        return
+    }
+
+    if cmd == "help-json" {
+        println(help_json())
+        return
+    }
+
+    if cmd == "version" {
+        if has_flag(a, "--json") {
+            println("{\"version\":\"" + version() + "\",\"name\":\"boilerplate-cli-ui-machin\"}")
+        } else {
+            println("boilerplate-cli-ui-machin v" + version())
+        }
+        return
+    }
+
+    if cmd == "help" {
+        usage()
+        return
+    }
+
+    // Back-compat aliases for the pre-spec command names.
+    if cmd == "start" {
+        if has_flag(a, "-daemon") {
+            daemon_start(resolve_host(a), resolve_port(a))
+        } else {
+            serve(resolve_host(a), resolve_port(a))
+        }
+        return
+    }
+    if cmd == "stop" {
+        daemon_stop(resolve_port(a))
+        return
+    }
+    if cmd == "status" {
+        daemon_status(resolve_port(a))
+        return
+    }
+
+    die(85, "unknown_command",
+        "unknown command \"" + cmd + "\"",
+        "boilerplate-cli-ui-machin help-json")
 }

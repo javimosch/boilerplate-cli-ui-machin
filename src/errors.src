@@ -1,0 +1,37 @@
+// Typed errors and the stderr helper (cli-output-spec §1-§3).
+//
+// The exit code and the error body's `code` are the same number, so an agent
+// that only reads the exit status and an agent that only parses the body reach
+// the same conclusion.
+
+// eprintln writes a line to the real stderr. MFL has no stderr builtin and
+// write_file("/dev/stderr", …) opens with O_TRUNC, which loses every line but
+// the last when stderr is redirected to a file; appending to our own fd 2 via
+// /proc/$PPID/fd/2 from the child is the route that works.
+func eprintln(s) {
+    q := replace(s, "'", "'\\''")
+    c, o, e := exec("printf '%s\\n' '" + q + "' >> /proc/$PPID/fd/2")
+    _ = c
+    _ = o
+    _ = e
+}
+
+// die prints a typed error on stdout and exits with the matching code.
+//
+//   80-89   input/validation  — do not retry, fix the input
+//   90-99   precondition/state — ask, or try another resource
+//   100-109 external          — transient, retry with backoff
+//   110-119 internal          — a bug, report it
+func die(code, etype, message, suggestion) {
+    recoverable := "false"
+    if code >= 100 {
+        if code <= 109 { recoverable = "true" }
+    }
+    out := "{\"ok\":false,\"error\":{\"code\":" + str(code)
+    out = out + ",\"type\":" + json(etype)
+    out = out + ",\"message\":" + json(message)
+    out = out + ",\"recoverable\":" + recoverable
+    out = out + ",\"suggestions\":[" + json(suggestion) + "]}}"
+    println(out)
+    exit(code)
+}
